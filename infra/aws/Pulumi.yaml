@@ -1,0 +1,11 @@
+name: aws-infrastructure
+runtime: python
+description: AWS infrastructure for multi-cloud API deployment
+
+config:
+  deploymentType:
+    type: string
+    default: lambda
+  appName:
+    type: string
+    default: multi-cloud-api

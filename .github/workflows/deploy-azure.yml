@@ -1,0 +1,220 @@
+name: Deploy to Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Deployment Type'
+        required: true
+        type: choice
+        options:
+          - functions
+          - vm
+          - aks
+      azure_location:
+        description: 'Azure Location'
+        required: true
+        default: 'eastus'
+      pulumi_stack:
+        description: 'Pulumi Stack'
+        required: true
+        default: 'dev'
+
+env:
+  APP_NAME: multi-cloud-api
+  AZURE_LOCATION: ${{ github.event.inputs.azure_location }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create Azure Container Registry
+        run: |
+          az acr create --resource-group ${{ env.APP_NAME }}-rg --name ${{ env.APP_NAME }}acr --sku Basic || true
+        continue-on-error: true
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name ${{ env.APP_NAME }}acr
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          cd api
+          ACR_LOGIN_SERVER=$(az acr show --name ${{ env.APP_NAME }}acr --query loginServer --output tsv)
+          docker build -t $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:${{ github.sha }} .
+          docker tag $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:${{ github.sha }} $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:latest
+          docker push $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:${{ github.sha }}
+          docker push $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:latest
+          echo "image_uri=$ACR_LOGIN_SERVER/${{ env.APP_NAME }}:latest" >> $GITHUB_OUTPUT
+
+  deploy-functions:
+    name: Deploy to Azure Functions
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deployment_type == 'functions'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v5
+
+      - name: Install dependencies
+        run: |
+          cd infra/azure
+          pip install -r requirements.txt
+
+      - name: Deploy with Pulumi
+        run: |
+          cd infra/azure
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }} || pulumi stack init ${{ github.event.inputs.pulumi_stack }}
+          pulumi config set deploymentType functions
+          pulumi config set appName ${{ env.APP_NAME }}
+          pulumi config set location ${{ env.AZURE_LOCATION }}
+          pulumi up --yes
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Get outputs
+        run: |
+          cd infra/azure
+          echo "Function App URL: $(pulumi stack output function_app_url)"
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+  deploy-vm:
+    name: Deploy to Azure VM
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deployment_type == 'vm'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v5
+
+      - name: Install dependencies
+        run: |
+          cd infra/azure
+          pip install -r requirements.txt
+
+      - name: Deploy with Pulumi
+        run: |
+          cd infra/azure
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }} || pulumi stack init ${{ github.event.inputs.pulumi_stack }}
+          pulumi config set deploymentType vm
+          pulumi config set appName ${{ env.APP_NAME }}
+          pulumi config set location ${{ env.AZURE_LOCATION }}
+          pulumi up --yes
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Get outputs
+        run: |
+          cd infra/azure
+          echo "VM Public IP: $(pulumi stack output vm_public_ip)"
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+  deploy-aks:
+    name: Deploy to Azure AKS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deployment_type == 'aks'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v5
+
+      - name: Install dependencies
+        run: |
+          cd infra/azure
+          pip install -r requirements.txt
+
+      - name: Deploy AKS with Pulumi
+        run: |
+          cd infra/azure
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }} || pulumi stack init ${{ github.event.inputs.pulumi_stack }}
+          pulumi config set deploymentType aks
+          pulumi config set appName ${{ env.APP_NAME }}
+          pulumi config set location ${{ env.AZURE_LOCATION }}
+          pulumi up --yes
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Get kubeconfig
+        run: |
+          cd infra/azure
+          pulumi stack output kubeconfig > kubeconfig.yaml
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Deploy to AKS
+        run: |
+          export KUBECONFIG=infra/azure/kubeconfig.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl get services
+
+      - name: Get service endpoint
+        run: |
+          export KUBECONFIG=infra/azure/kubeconfig.yaml
+          kubectl get service ${{ env.APP_NAME }}-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'

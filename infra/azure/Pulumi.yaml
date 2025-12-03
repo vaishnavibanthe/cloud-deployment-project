@@ -1,0 +1,14 @@
+name: azure-infrastructure
+runtime: python
+description: Azure infrastructure for multi-cloud API deployment
+
+config:
+  deploymentType:
+    type: string
+    default: functions
+  appName:
+    type: string
+    default: multi-cloud-api
+  location:
+    type: string
+    default: eastus
