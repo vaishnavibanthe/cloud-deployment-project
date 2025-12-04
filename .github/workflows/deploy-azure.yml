@@ -22,6 +22,7 @@ on:
 
 env:
   APP_NAME: multi-cloud-api
+  ACR_NAME: multicloudapiacr
   AZURE_LOCATION: ${{ github.event.inputs.azure_location }}
 
 jobs:
@@ -42,18 +43,18 @@ jobs:
 
       - name: Create Azure Container Registry
         run: |
-          az acr create --resource-group ${{ env.APP_NAME }}-rg --name ${{ env.APP_NAME }}acr --sku Basic || true
+          az acr create --resource-group ${{ env.APP_NAME }}-rg --name ${{ env.ACR_NAME }} --sku Basic || true
         continue-on-error: true
 
       - name: Login to Azure Container Registry
         run: |
-          az acr login --name ${{ env.APP_NAME }}acr
+          az acr login --name ${{ env.ACR_NAME }}
 
       - name: Build and push Docker image
         id: build
         run: |
           cd api
-          ACR_LOGIN_SERVER=$(az acr show --name ${{ env.APP_NAME }}acr --query loginServer --output tsv)
+          ACR_LOGIN_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --query loginServer --output tsv)
           docker build -t $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:${{ github.sha }} .
           docker tag $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:${{ github.sha }} $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:latest
           docker push $ACR_LOGIN_SERVER/${{ env.APP_NAME }}:${{ github.sha }}
