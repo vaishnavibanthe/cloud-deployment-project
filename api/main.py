@@ -1,6 +1,12 @@
+# main.py
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-import uvicorn
+try:
+    # Mangum is optional at runtime — only required for Lambda deployments
+    from mangum import Mangum
+    _HAS_MANGUM = True
+except Exception:
+    _HAS_MANGUM = False
 
 app = FastAPI(title="Multi-Cloud API")
 
@@ -17,5 +23,6 @@ async def health():
     return {"status": "healthy"}
 
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+# Lambda handler (Mangum) — only used when running in Lambda
+if _HAS_MANGUM:
+    handler = Mangum(app)   # Lambda entrypoint: module.handler
