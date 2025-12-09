@@ -1,3 +1,4 @@
+# Dockerfile.dev - for local development / Codespaces / ECS (long-running server)
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -12,5 +13,5 @@ COPY main.py .
 # Expose port
 EXPOSE 8080
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run the application (uvicorn) — appropriate for local, Codespaces, ECS, App Runner
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
