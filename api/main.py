@@ -1,20 +1,22 @@
 # main.py
 
 from fastapi import FastAPI
-
-import sys
  
 app = FastAPI(title="Multi-Cloud API")
  
- 
+# ----------------------------
+
+# Endpoints
+
+# ----------------------------
+
 @app.get("/")
 
 async def root():
 
     """Root endpoint returning a simple JSON response"""
 
-    return {"hi": "Hello from Multi-Cloud API!"}
- 
+    return {"message": "Hello from Multi-Cloud API!"}
  
 @app.get("/health")
 
@@ -24,10 +26,9 @@ async def health():
 
     return {"status": "healthy"}
  
- 
 # ----------------------------
 
-# Lambda handler using Mangum
+# Lambda handler (Mangum)
 
 # ----------------------------
 
@@ -35,18 +36,17 @@ try:
 
     from mangum import Mangum
 
-    handler = Mangum(app)  # this is the AWS Lambda handler
+    handler = Mangum(app)  # AWS Lambda entrypoint
 
 except ImportError:
 
-    # Mangum not installed locally, define a dummy handler to avoid errors
+    # Mangum not installed in local dev; fallback to None
 
     handler = None
  
- 
 # ----------------------------
 
-# Local development with uvicorn
+# Local development
 
 # ----------------------------
 
