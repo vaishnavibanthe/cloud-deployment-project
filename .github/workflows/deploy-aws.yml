@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_uri: ${{ steps.build.outputs.image_uri }}
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -68,8 +68,8 @@ jobs:
     name: Deploy to AWS Lambda
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.deployment_type == 'lambda' }}
-
+    if: github.event.inputs.deployment_type == 'lambda'
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -86,68 +86,51 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Pulumi CLI
-        run: |
-          curl -fsSL https://get.pulumi.com | sh
-          echo "$HOME/.pulumi/bin" >> $GITHUB_PATH
+      - name: Install Pulumi
+        uses: pulumi/actions@v5
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           cd infra/aws
           pip install -r requirements.txt
 
-      - name: Ensure Pulumi stack exists (select or create)
+      - name: Deploy with Pulumi
+        uses: pulumi/actions@v5
+        with:
+          command: up
+          stack-name: ${{ github.event.inputs.pulumi_stack }}
+          work-dir: infra/aws
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        run: |
-          set -e
-          cd infra/aws
-          pulumi login --cloud-url https://api.pulumi.com
-          if pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive 2>/dev/null; then
-            echo "Selected existing stack ${{ github.event.inputs.pulumi_stack }}"
-          else
-            echo "Stack not found; creating stack ${{ github.event.inputs.pulumi_stack }}"
-            pulumi stack init ${{ github.event.inputs.pulumi_stack }} --non-interactive
-          fi
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+        continue-on-error: false
 
-      - name: Set Pulumi config values (deploymentType, appName, imageUri)
+      - name: Set Pulumi config
+        run: |
+          cd infra/aws
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }}
+          pulumi config set deploymentType lambda
+          pulumi config set appName ${{ env.APP_NAME }}
+          pulumi up --yes
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        run: |
-          set -e
-          cd infra/aws
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
-          pulumi config set deploymentType lambda --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-          pulumi config set appName ${{ env.APP_NAME }} --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-
-          # Pass built image URI into Pulumi config (if you want Pulumi to use a CI-built image)
-          pulumi config set imageUri "${{ needs.build-and-push.outputs.image_uri }}" --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive || true
-
-      - name: Deploy with Pulumi (pulumi up)
-        env:
-          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        run: |
-          set -e
-          cd infra/aws
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive
-          pulumi up --yes --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-
-      - name: Get API endpoint output
+      - name: Get outputs
         id: pulumi-outputs
-        env:
-          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
           cd infra/aws
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive
-          echo "api_endpoint=$(pulumi stack output api_endpoint)" >> $GITHUB_OUTPUT
+          pulumi stack output api_endpoint
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
   deploy-ec2:
     name: Deploy to AWS EC2
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.deployment_type == 'ec2' }}
-
+    if: github.event.inputs.deployment_type == 'ec2'
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -164,48 +147,40 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Pulumi CLI
-        run: |
-          curl -fsSL https://get.pulumi.com | sh
-          echo "$HOME/.pulumi/bin" >> $GITHUB_PATH
+      - name: Install Pulumi
+        uses: pulumi/actions@v5
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           cd infra/aws
           pip install -r requirements.txt
 
-      - name: Ensure Pulumi stack exists and deploy (EC2)
+      - name: Deploy with Pulumi
+        run: |
+          cd infra/aws
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }} || pulumi stack init ${{ github.event.inputs.pulumi_stack }}
+          pulumi config set deploymentType ec2
+          pulumi config set appName ${{ env.APP_NAME }}
+          pulumi up --yes
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        run: |
-          set -e
-          cd infra/aws
-          pulumi login --cloud-url https://api.pulumi.com
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive || pulumi stack init ${{ github.event.inputs.pulumi_stack }} --non-interactive
-
-          pulumi config set deploymentType ec2 --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-          pulumi config set appName ${{ env.APP_NAME }} --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-
-          # pass image URI if EC2 uses the image
-          pulumi config set imageUri "${{ needs.build-and-push.outputs.image_uri }}" --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive || true
-
-          pulumi up --yes --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Get outputs
         run: |
           cd infra/aws
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive
           echo "EC2 Public IP: $(pulumi stack output ec2_public_ip)"
           echo "EC2 Public DNS: $(pulumi stack output ec2_public_dns)"
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
   deploy-eks:
     name: Deploy to AWS EKS
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.deployment_type == 'eks' }}
-
+    if: github.event.inputs.deployment_type == 'eks'
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -222,44 +197,37 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Pulumi CLI
-        run: |
-          curl -fsSL https://get.pulumi.com | sh
-          echo "$HOME/.pulumi/bin" >> $GITHUB_PATH
+      - name: Install Pulumi
+        uses: pulumi/actions@v5
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           cd infra/aws
           pip install -r requirements.txt
 
-      - name: Ensure Pulumi stack exists and deploy (EKS)
+      - name: Deploy EKS with Pulumi
+        run: |
+          cd infra/aws
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }} || pulumi stack init ${{ github.event.inputs.pulumi_stack }}
+          pulumi config set deploymentType eks
+          pulumi config set appName ${{ env.APP_NAME }}
+          pulumi up --yes
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        run: |
-          set -e
-          cd infra/aws
-          pulumi login --cloud-url https://api.pulumi.com
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive || pulumi stack init ${{ github.event.inputs.pulumi_stack }} --non-interactive
-
-          pulumi config set deploymentType eks --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-          pulumi config set appName ${{ env.APP_NAME }} --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
-
-          pulumi config set imageUri "${{ needs.build-and-push.outputs.image_uri }}" --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive || true
-
-          pulumi up --yes --stack ${{ github.event.inputs.pulumi_stack }} --non-interactive
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Get kubeconfig
         run: |
           cd infra/aws
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} --non-interactive
           pulumi stack output kubeconfig > kubeconfig.yaml
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
 
-      - name: Deploy to EKS (k8s manifests)
+      - name: Deploy to EKS
         run: |
           export KUBECONFIG=infra/aws/kubeconfig.yaml
           kubectl apply -f k8s/deployment.yaml
