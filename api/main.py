@@ -1,6 +1,5 @@
 # main.py
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 
 app = FastAPI(title="Multi-Cloud API")
 
@@ -18,12 +17,13 @@ async def health():
 
 
 # Lambda handler using Mangum (safe to import in Lambda)
-# Note: this requires `mangum` in requirements.txt
+# Requires `mangum` in requirements.txt
+handler = None
 try:
-    from mangum import Mangum  # optional import; only used in Lambda
+    from mangum import Mangum  # only used in Lambda
     handler = Mangum(app)
-except Exception:
-    # If Mangum is not installed in local dev image, just ignore.
+except ImportError:
+    # Mangum not installed in local dev; ignore so local dev works with uvicorn
     handler = None
 
 
