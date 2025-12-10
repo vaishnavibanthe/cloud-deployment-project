@@ -102,16 +102,12 @@ jobs:
 
           cd api
 
-          # IMPORTANT: Build lambda stage only
-
           docker build --target lambda -t $ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG .
 
           docker push $ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG
- 
+
           echo "image_uri=$ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
  
-  # ---------------------------- LAMBDA DEPLOY ----------------------------
-
   deploy-lambda:
 
     name: Deploy to AWS Lambda
@@ -160,7 +156,7 @@ jobs:
 
           pip install -r requirements.txt
  
-      - name: Set Pulumi configs (Lambda)
+      - name: Deploy Lambda with Pulumi
 
         run: |
 
@@ -182,8 +178,6 @@ jobs:
 
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
  
-  # ---------------------------- EC2 DEPLOY ----------------------------
-
   deploy-ec2:
 
     name: Deploy to AWS EC2
@@ -268,8 +262,6 @@ jobs:
 
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
  
-  # ---------------------------- EKS DEPLOY ----------------------------
-
   deploy-eks:
 
     name: Deploy to AWS EKS
