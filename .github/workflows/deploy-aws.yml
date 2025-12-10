@@ -88,7 +88,7 @@ jobs:
 
           aws ecr create-repository --repository-name ${{ env.APP_NAME }} --region ${{ env.AWS_REGION }}
  
-      - name: Build and push Docker image (Lambda Target)
+      - name: Build and push Docker image
 
         id: build
 
@@ -102,16 +102,16 @@ jobs:
 
           cd api
 
-          # IMPORTANT: Build lambda stage only
+          docker build -t $ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG .
 
-          docker build --target lambda -t $ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG $ECR_REGISTRY/${{ env.APP_NAME }}:latest
 
           docker push $ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG
- 
-          echo "image_uri=$ECR_REGISTRY/${{ env.APP_NAME }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
- 
-  # ---------------------------- LAMBDA DEPLOY ----------------------------
 
+          docker push $ECR_REGISTRY/${{ env.APP_NAME }}:latest
+
+          echo "image_uri=$ECR_REGISTRY/${{ env.APP_NAME }}:latest" >> $GITHUB_OUTPUT
+ 
   deploy-lambda:
 
     name: Deploy to AWS Lambda
@@ -160,19 +160,37 @@ jobs:
 
           pip install -r requirements.txt
  
-      - name: Set Pulumi configs (Lambda)
+      - name: Deploy with Pulumi
+
+        uses: pulumi/actions@v5
+
+        with:
+
+          command: up
+
+          stack-name: ${{ github.event.inputs.pulumi_stack }}
+
+          work-dir: infra/aws
+
+        env:
+
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+
+        continue-on-error: false
+ 
+      - name: Set Pulumi config
 
         run: |
 
           cd infra/aws
 
-          pulumi stack select ${{ github.event.inputs.pulumi_stack }} || pulumi stack init ${{ github.event.inputs.pulumi_stack }}
+          pulumi stack select ${{ github.event.inputs.pulumi_stack }}
 
           pulumi config set deploymentType lambda
 
           pulumi config set appName ${{ env.APP_NAME }}
-
-          pulumi config set imageUri ${{ needs.build-and-push.outputs.image_uri }}
 
           pulumi up --yes
 
@@ -182,8 +200,22 @@ jobs:
 
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
  
-  # ---------------------------- EC2 DEPLOY ----------------------------
+      - name: Get outputs
 
+        id: pulumi-outputs
+
+        run: |
+
+          cd infra/aws
+
+          pulumi stack output api_endpoint
+
+        env:
+
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+ 
   deploy-ec2:
 
     name: Deploy to AWS EC2
@@ -232,7 +264,7 @@ jobs:
 
           pip install -r requirements.txt
  
-      - name: Deploy EC2 with Pulumi
+      - name: Deploy with Pulumi
 
         run: |
 
@@ -252,7 +284,7 @@ jobs:
 
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
  
-      - name: Get EC2 Outputs
+      - name: Get outputs
 
         run: |
 
@@ -268,8 +300,6 @@ jobs:
 
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
  
-  # ---------------------------- EKS DEPLOY ----------------------------
-
   deploy-eks:
 
     name: Deploy to AWS EKS
@@ -368,12 +398,11 @@ jobs:
 
           kubectl get services
  
-      - name: Get EKS Service Endpoint
+      - name: Get service endpoint
 
         run: |
 
           export KUBECONFIG=infra/aws/kubeconfig.yaml
 
           kubectl get service ${{ env.APP_NAME }}-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-
  
